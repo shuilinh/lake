@@ -1,3 +1,4 @@
+
 name: CF VLESS node (US exit)
 
 on:
@@ -27,6 +28,7 @@ jobs:
           chmod +x /tmp/cloudflared
           mkdir -p /tmp/xray
           python3 -c "import zipfile; zipfile.ZipFile('/tmp/xray.zip').extractall('/tmp/xray')"
+          chmod +x /tmp/xray/xray
 
       - name: Run node (up to 6h)
         run: |
@@ -44,24 +46,40 @@ jobs:
             }]
           }
           EOF
+          /tmp/xray/xray version
           /tmp/xray/xray run -c /tmp/xray/config.json > /tmp/xray.log 2>&1 &
+          XRAY_PID=$!
+          sleep 2
+          if ! kill -0 "$XRAY_PID" 2>/dev/null; then
+            echo "XRAY FAILED TO START:"; cat /tmp/xray.log; exit 1
+          fi
           /tmp/cloudflared tunnel --url http://127.0.0.1:10086 --no-autoupdate > /tmp/cf.log 2>&1 &
+          CF_PID=$!
           URL=""
-          for i in $(seq 1 120); do
+          for i in $(seq 1 150); do
+            if ! kill -0 "$CF_PID" 2>/dev/null; then
+              echo "CLOUDFLARED DIED EARLY:"; cat /tmp/cf.log; exit 1
+            fi
             URL=$(grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' /tmp/cf.log 2>/dev/null | head -1 || true)
-            [ -n "$URL" ] && break
+            if [ -n "$URL" ]; then break; fi
             sleep 1
           done
-          if [ -z "$URL" ]; then echo "TUNNEL FAILED"; cat /tmp/cf.log; exit 1; fi
+          if [ -z "$URL" ]; then
+            echo "NO URL AFTER 150s - cf.log:"; cat /tmp/cf.log; exit 1
+          fi
           HOST="${URL#https://}"
           echo "vless://$UUID@$HOST:443?encryption=none&security=tls&sni=$HOST&host=$HOST&type=ws&path=%2Fcfws#CF-US" > vless.txt
-          git clone -q "https://x-access-token:*** pub
+          echo "=== VLESS LINK (copy this even if git push fails) ==="
+          cat vless.txt
+          git clone -q "https://x-access-token:*** pub || echo "CLONE FAILED"
           cd pub
           cp ../vless.txt .
           git config user.name cfnode-bot
           git config user.email cfnode-bot@users.noreply.github.com
           git add vless.txt
-          git commit -m "node online: $HOST"
-          git push
-          echo "NODE_URL=$URL"
-          wait
+          git commit -m "node online: $HOST" || echo "COMMIT FAILED"
+          git push || echo "PUSH FAILED - use the link printed above"
+          cd ..
+          echo "NODE UP: $URL"
+          wait "$XRAY_PID" || true
+          wait "$CF_PID" || true
