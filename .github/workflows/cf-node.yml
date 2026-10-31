@@ -1,0 +1,59 @@
+name: CF VLESS node (US exit)
+
+on:
+  workflow_dispatch: {}
+
+concurrency:
+  group: cf-node
+  cancel-in-progress: false
+
+jobs:
+  node:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - name: Fetch binaries
+        run: |
+          curl -fsSL -o /tmp/xray.zip https://github.com/XTLS/Xray-core/releases/download/v26.10.29/Xray-linux-64.zip
+          curl -fsSL -o /tmp/cloudflared https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64
+          chmod +x /tmp/cloudflared
+          mkdir -p /tmp/xray
+          python3 -c "import zipfile; zipfile.ZipFile('/tmp/xray.zip').extractall('/tmp/xray')"
+
+      - name: Run node (up to 6h)
+        run: |
+          set -e
+          UUID=06e75b3e-3935-4b9e-bc5e-718e5c485d16
+          cat > /tmp/xray/config.json <<EOF
+          {
+            "log": {"level": "warning"},
+            "inbounds": [{
+              "listen": "127.0.0.1",
+              "port": 10086,
+              "protocol": "vless",
+              "settings": {"clients": [{"id": "$UUID", "flow": ""}], "decryption": "none"},
+              "streamSettings": {"network": "ws", "wsSettings": {"path": "/cfws"}}
+            }]
+          }
+          EOF
+          /tmp/xray/xray run -c /tmp/xray/config.json > /tmp/xray.log 2>&1 &
+          /tmp/cloudflared tunnel --url http://127.0.0.1:10086 --no-autoupdate > /tmp/cf.log 2>&1 &
+          URL=""
+          for i in $(seq 1 120); do
+            URL=$(grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' /tmp/cf.log 2>/dev/null | head -1 || true)
+            [ -n "$URL" ] && break
+            sleep 1
+          done
+          if [ -z "$URL" ]; then echo "TUNNEL FAILED"; cat /tmp/cf.log; exit 1; fi
+          HOST="${URL#https://}"
+          echo "vless://$UUID@$HOST:443?encryption=none&security=tls&sni=$HOST&host=$HOST&type=ws&path=%2Fcfws#CF-US" > vless.txt
+          git clone -q "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}" pub
+          cd pub
+          cp ../vless.txt .
+          git config user.name cfnode-bot
+          git config user.email cfnode-bot@users.noreply.github.com
+          git add vless.txt
+          git commit -m "node online: $HOST"
+          git push
+          echo "NODE_URL=$URL"
+          wait
