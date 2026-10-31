@@ -14,8 +14,16 @@ jobs:
     steps:
       - name: Fetch binaries
         run: |
-          curl -fsSL -o /tmp/xray.zip https://github.com/XTLS/Xray-core/releases/download/v26.10.29/Xray-linux-64.zip
-          curl -fsSL -o /tmp/cloudflared https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64
+          XRAY_URL=$(curl -fsSL "https://api.github.com/repos/XTLS/Xray-core/releases/latest" | python3 -c "
+          import sys, json, re
+          d = json.load(sys.stdin)
+          urls = [a['browser_download_url'] for a in d['assets']]
+          match = [u for u in urls if u.endswith('Xray-linux-64.zip')] or [u for u in urls if re.search(r'Xray-linux-64', u)]
+          print(match[0])
+          ")
+          echo "Using Xray: $XRAY_URL"
+          curl -fsSL -o /tmp/xray.zip "$XRAY_URL"
+          curl -fsSL -o /tmp/cloudflared "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64"
           chmod +x /tmp/cloudflared
           mkdir -p /tmp/xray
           python3 -c "import zipfile; zipfile.ZipFile('/tmp/xray.zip').extractall('/tmp/xray')"
@@ -47,7 +55,7 @@ jobs:
           if [ -z "$URL" ]; then echo "TUNNEL FAILED"; cat /tmp/cf.log; exit 1; fi
           HOST="${URL#https://}"
           echo "vless://$UUID@$HOST:443?encryption=none&security=tls&sni=$HOST&host=$HOST&type=ws&path=%2Fcfws#CF-US" > vless.txt
-          git clone -q "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}" pub
+          git clone -q "https://x-access-token:*** pub
           cd pub
           cp ../vless.txt .
           git config user.name cfnode-bot
