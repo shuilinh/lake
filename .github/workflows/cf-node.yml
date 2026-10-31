@@ -1,4 +1,3 @@
-
 name: CF VLESS node (US exit)
 
 on:
@@ -68,18 +67,15 @@ jobs:
             echo "NO URL AFTER 150s - cf.log:"; cat /tmp/cf.log; exit 1
           fi
           HOST="${URL#https://}"
-          echo "vless://$UUID@$HOST:443?encryption=none&security=tls&sni=$HOST&host=$HOST&type=ws&path=%2Fcfws#CF-US" > vless.txt
-          echo "=== VLESS LINK (copy this even if git push fails) ==="
-          cat vless.txt
-          git clone -q "https://x-access-token:*** pub || echo "CLONE FAILED"
-          cd pub
-          cp ../vless.txt .
-          git config user.name cfnode-bot
-          git config user.email cfnode-bot@users.noreply.github.com
-          git add vless.txt
-          git commit -m "node online: $HOST" || echo "COMMIT FAILED"
-          git push || echo "PUSH FAILED - use the link printed above"
-          cd ..
-          echo "NODE UP: $URL"
+          VLESS="vless://$UUID@$HOST:443?encryption=none&security=tls&sni=$HOST&host=$HOST&type=ws&path=%2Fcfws#CF-US"
+          {
+            echo "### VLESS 节点链接（复制下面这行粘进 Hiddify）"
+            echo ""
+            echo '```'
+            echo "$VLESS"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "=== VLESS LINK ==="
+          echo "$VLESS"
           wait "$XRAY_PID" || true
           wait "$CF_PID" || true
